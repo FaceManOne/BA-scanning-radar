@@ -9,14 +9,20 @@ from datetime import datetime
 # 成交额查询与格式化工具
 # ============================================================
 
-def get_quote_volume(symbol, api_url="https://api.binance.com/api/v3/ticker/24hr"):
-    """查询单个交易对的24h成交额(USDT)。失败返回None。"""
-    try:
-        r = requests.get(api_url, params={"symbol": symbol}, timeout=5)
-        data = r.json()
-        return float(data["quoteVolume"])
-    except Exception:
-        return None
+def get_quote_volume(symbol):
+    for url in (
+        "https://fapi.binance.com/fapi/v1/ticker/24hr",
+        "https://api.binance.com/api/v3/ticker/24hr",
+    ):
+        try:
+            r = requests.get(url, params={"symbol": symbol}, timeout=5)
+            data = r.json()
+            qv = float(data.get("quoteVolume", 0))
+            if qv > 0:
+                return qv
+        except Exception:
+            continue
+    return None
 
 
 def format_volume(quote_volume):
