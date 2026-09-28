@@ -29,6 +29,29 @@ def format_volume(quote_volume):
     return "{0:.1f}M".format(millions)
 
 
+def format_price(price):
+    """按规则格式化价格：
+    - >= 1000: 只留整数
+    - 1 ~ 1000: 2位小数
+    - < 1: 8位小数，去掉末尾多余的0
+    """
+    try:
+        p = float(price)
+    except (TypeError, ValueError):
+        return "N/A"
+
+    if p >= 1000:
+        return "{0:.0f}".format(p)
+    elif p >= 1:
+        return "{0:.2f}".format(p)
+    else:
+        s = "{0:.8f}".format(p)
+        s = s.rstrip("0").rstrip(".")
+        if s == "":
+            s = "0"
+        return s
+
+
 class ReportGenerator:
     def __init__(
         self,
@@ -75,8 +98,10 @@ class ReportGenerator:
             arrow = "\U0001F4C9"   # 📉
             sign = ""
 
+        price_str = format_price(price)
+
         # 单行精简格式
-        msg = "{0} {1} | {2} | \U0001F30A{3} {4}{5}{6:.2f}%".format(
+        msg = "{0} {1} | {2} | \U0001F30A{3} {4}{5}{6:.2f}% | \U0001F4B2{7}".format(
             emoji,
             symbol,
             interval,
@@ -84,6 +109,7 @@ class ReportGenerator:
             arrow,
             sign,
             change * 100,
+            price_str,
         )
 
         # ===== 链接（暂时注释，需要时去掉注释即可）=====
@@ -173,6 +199,32 @@ class ReportGenerator:
                 asset["push_level_down"] = target_down
 
     # ============================================================
+    # 市场统计（全口径，全697个币，按指定窗口）
+    # ============================================================
+
+    def _market_statistics(self, assets, interval):
+        """返回 (avg_change, up_count, down_count)，全口径，不分成交流动性。"""
+        up = 0
+        down = 0
+        sum_change = 0.0
+        total = 0
+
+        for asset in assets:
+            change = asset[interval]["change_current"]
+            sum_change += change
+            total += 1
+            if change > 0:
+                up += 1
+            elif change < 0:
+                down += 1
+
+        if total == 0:
+            return 0.0, 0, 0
+
+        avg_change = sum_change / total
+        return avg_change, up, down
+
+    # ============================================================
     # 15分钟汇总报告
     # ============================================================
 
@@ -228,10 +280,17 @@ class ReportGenerator:
         else:
             lines.append("  （无）")
 
+        # ===== Market Average 统计（全口径）=====
+        avg_change, up_count, down_count = self._market_statistics(assets, interval)
+        lines.append("")
+        lines.append("\U0001F4CA Market Average: {0:+.2f}%".format(avg_change * 100))
+        lines.append("\U0001F7E2 {0} / \U0001F534 {1}".format(up_count, down_count))
+        # ==========================================
+
         self.telegram.send_report_message("\n".join(lines))
 
     # ============================================================
-    # 1小时榜单（独立，整点，有内容才发）
+    # 1小时榜单（整点必发，独立）
     # ============================================================
 
     def send_hourly_report(self, assets, chart_intervals, extract_interval, hourly_config):
@@ -241,6 +300,19 @@ class ReportGenerator:
 
         one_hour_points = 3600 // extract_interval
 
+        # 检查数据是否足够（用第一个资产判断）
+        data_enough = False
+        if assets:
+            data_enough = len(assets[0]["price"]) >= one_hour_points
+
+        # 数据不够：只发提示
+        if not data_enough:
+            lines = ["\u23F0 *1\u5c0f\u65f6\u699c\u5355*", ""]
+            lines.append("\U0001F4CA 数据积累中...")
+            self.telegram.send_report_message("\n".join(lines))
+            return
+
+        # 算1小时窗口的涨跌幅
         ups = []
         downs = []
         for asset in assets:
@@ -255,9 +327,6 @@ class ReportGenerator:
                 ups.append((asset["symbol"], change))
             elif change <= -min_change:
                 downs.append((asset["symbol"], change))
-
-        if not ups and not downs:
-            return
 
         ups.sort(key=lambda x: x[1], reverse=True)
         downs.sort(key=lambda x: x[1])
@@ -282,11 +351,9 @@ class ReportGenerator:
             if line is not None:
                 down_lines.append(line)
 
-        if not up_lines and not down_lines:
-            return
-
         lines = ["\u23F0 *1\u5c0f\u65f6\u699c\u5355*", ""]
 
+        # 只在有内容时才显示榜单；没内容直接跳过
         if up_lines:
             lines.append("\U0001F4C8 *1h \u6da8\u5e45\u699c*")
             lines.extend(up_lines)
@@ -296,7 +363,44 @@ class ReportGenerator:
             lines.append("\U0001F4C9 *1h \u8dcc\u5e45\u699c*")
             lines.extend(down_lines)
 
+        # ===== Market Average 统计（1小时窗口，全口径）=====
+        avg_change, up_count, down_count = self._market_statistics_1h(
+            assets, one_hour_points
+        )
+        lines.append("")
+        lines.append("\U0001F4CA Market Average: {0:+.2f}%".format(avg_change * 100))
+        lines.append("\U0001F7E2 {0} / \U0001F534 {1}".format(up_count, down_count))
+        # =====================================================
+
         self.telegram.send_report_message("\n".join(lines))
+
+    def _market_statistics_1h(self, assets, one_hour_points):
+        """全口径1小时窗口统计。"""
+        up = 0
+        down = 0
+        sum_change = 0.0
+        total = 0
+
+        for asset in assets:
+            price_series = asset["price"]
+            if len(price_series) < one_hour_points:
+                continue
+            old_price = price_series[-one_hour_points]
+            if old_price == 0:
+                continue
+            change = (price_series[-1] - old_price) / old_price
+            sum_change += change
+            total += 1
+            if change > 0:
+                up += 1
+            elif change < 0:
+                down += 1
+
+        if total == 0:
+            return 0.0, 0, 0
+
+        avg_change = sum_change / total
+        return avg_change, up, down
 
     # ============================================================
     # Top Pump & Dump 统计报告（原版保留）
