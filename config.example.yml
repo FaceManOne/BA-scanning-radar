@@ -2,7 +2,7 @@
 
 # Using Spot API with url set to https://api.binance.com/api/v3/ticker/price
 # Using Futures API with url set to: https://fapi.binance.com/fapi/v1/ticker/price
-apiUrl: https://api.binance.com/api/v3/ticker/price
+apiUrl: https://fapi.binance.com/fapi/v1/ticker/price
 
 chartIntervals:
   - 15m
