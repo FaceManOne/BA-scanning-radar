@@ -98,3 +98,13 @@ BPA is a simple application which gets the price data from Binance Spot or Futur
 - 5 million USDT threshold
 - Strikethrough for non-qualified items, ✅ for qualified items
 - 1h leaderboard
+
+# Instant Alerts (Tiered, Symmetric Up/Down)
+- Asset Type | Tiers
+- TradFi | 1.5% / 3% / 4.5%
+- Crypto | 2.5% / 5% / 7.5%
+
+- Trading Volume Threshold
+- Asset Type | Threshold
+- TradFi | 9M
+- Crypto | 30M
