@@ -1,6 +1,7 @@
 import colorlog, logging
 import os
 import yaml
+import requests
 
 from alerter import BinancePumpAndDumpAlerter
 from reporter import ReportGenerator
@@ -54,14 +55,30 @@ def main():
         news_emoji=config["newsEmoji"],
     )
 
+    # 拉取股票合约列表
+    try:
+        _resp = requests.get("https://fapi.binance.com/fapi/v1/exchangeInfo", timeout=10).json()
+        stock_symbols = set(
+            s["symbol"] for s in _resp.get("symbols", [])
+            if s.get("underlyingType") and s.get("underlyingType") != "COIN"
+        )
+        logger.info("【分类】拉取到 %d 个股票类合约。", len(stock_symbols))
+    except Exception as e:
+        logger.error("【分类】拉取股票合约列表失败：%s", e)
+        stock_symbols = set()
+
     reporter = ReportGenerator(
         telegram=telegram,
         alert_skip_threshold=config["alertSkipThreshold"],
-        alert_levels=config.get(
-            "alertLevels",
-            {"up": [0.05, 0.10, 0.15], "down": [0.05, 0.10, 0.15]},
-        ),
-        min_quote_volume=config.get("minQuoteVolume", 10_000_000),   # ← 新增这行
+        alert_levels=config.get("alertLevels", {
+            "crypto": {"up": [0.025, 0.05, 0.075], "down": [0.025, 0.05, 0.075]},
+            "tradfi": {"up": [0.015, 0.03, 0.045], "down": [0.015, 0.03, 0.045]},
+        }),
+        min_quote_volume=config.get("minQuoteVolume", {
+            "crypto": 30_000_000,
+            "tradfi": 9_000_000,
+        }),
+        stock_symbols=stock_symbols,
         pump_emoji=config["pumpEmoji"],
         dump_emoji=config["dumpEmoji"],
     )
@@ -88,20 +105,17 @@ def main():
         top_report_nearest_hour=config["topReportNearestHour"],
         telegram=telegram,
         report_generator=reporter,
-        alert_levels=config.get(
-            "alertLevels",
-            {"up": [0.05, 0.10, 0.15], "down": [0.05, 0.10, 0.15]},
-        ),
         summary_config={
             "enabled": config.get("summaryEnabled", True),
             "min_change": config.get("summaryMinChange", 0.05),
             "max_coins": config.get("summaryMaxCoins", 20),
         },
-        hourly_report_config={                                    # ← 新增
+        hourly_report_config={
             "enabled": config.get("hourlyReportEnabled", True),
-            "min_change": config.get("hourlyReportMinChange", 0.10),
+            "min_change": config.get("hourlyReportMinChange", {"crypto": 0.10, "tradfi": 0.05}),
             "max_coins": config.get("hourlyReportMaxCoins", 10),
         },
+        stock_symbols=stock_symbols,
     )
 
     alerter.run()

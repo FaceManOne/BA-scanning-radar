@@ -10,28 +10,42 @@ chartIntervals:
 outlierIntervals:
   "15m": 0.025
 
+# 成交额硬门槛（USDT）
+minQuoteVolume:
+  crypto: 30000000      # 加密货币：3000万
+  tradfi: 9000000       # 传统金融：900万
+
+# 即时警报档位（涨跌对称）
 alertLevels:
-  up:
-    - 0.025
-    - 0.05
-    - 0.075
-  down:
-    - 0.025
-    - 0.05
-    - 0.075
+  crypto:
+    up:
+      - 0.025
+      - 0.05
+      - 0.075
+    down:
+      - 0.025
+      - 0.05
+      - 0.075
+  tradfi:
+    up:
+      - 0.015
+      - 0.03
+      - 0.045
+    down:
+      - 0.015
+      - 0.03
+      - 0.045
 
-summaryEnabled: True
-summaryMinChange: 0.05
-summaryMaxCoins: 20
-# 1小时榜单（整点检查，有内容才发）
+# 1小时榜单阈值
 hourlyReportEnabled: True
-hourlyReportMinChange: 0.10
+hourlyReportMinChange:
+  crypto: 0.10
+  tradfi: 0.05
 hourlyReportMaxCoins: 10
-minQuoteVolume: 5000000
 
 
-telegramToken: your tokne
-telegramChatId: your id
+telegramToken: 
+telegramChatId: 
 telegramAlertChatId: 0
 
 # 扫描间隔

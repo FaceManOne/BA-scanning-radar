@@ -30,11 +30,7 @@ def format_volume(quote_volume):
 
 
 def format_price(price):
-    """按规则格式化价格：
-    - >= 1000: 只留整数
-    - 1 ~ 1000: 2位小数
-    - < 1: 8位小数，去掉末尾多余的0
-    """
+    """按规则格式化价格。"""
     try:
         p = float(price)
     except (TypeError, ValueError):
@@ -53,7 +49,7 @@ def format_price(price):
 
 
 def strip_usdt(symbol):
-    """去掉 USDT 后缀，只针对 USDT 结尾的币种。"""
+    """去掉 USDT 后缀。"""
     if symbol.endswith("USDT"):
         return symbol[:-4]
     return symbol
@@ -65,7 +61,8 @@ class ReportGenerator:
         telegram,
         alert_skip_threshold,
         alert_levels=None,
-        min_quote_volume=10_000_000,
+        min_quote_volume=None,
+        stock_symbols=None,
         pump_emoji="\U0001F7E2",  # 🟢
         dump_emoji="\U0001F534",  # 🔴
     ):
@@ -74,40 +71,58 @@ class ReportGenerator:
         self.pump_emoji = pump_emoji
         self.dump_emoji = dump_emoji
 
+        # 两套档位
         if alert_levels is None:
             alert_levels = {
-                "up": [0.05, 0.10, 0.15],
-                "down": [0.05, 0.10, 0.15],
+                "crypto": {"up": [0.025, 0.05, 0.075], "down": [0.025, 0.05, 0.075]},
+                "tradfi": {"up": [0.015, 0.03, 0.045], "down": [0.015, 0.03, 0.045]},
             }
         self.alert_levels = alert_levels
+
+        # 两套门槛
+        if min_quote_volume is None:
+            min_quote_volume = {"crypto": 30_000_000, "tradfi": 9_000_000}
         self.min_quote_volume = min_quote_volume
+
+        self.stock_symbols = stock_symbols or set()
 
         self.logger = logging.getLogger("report-generator")
 
     # ============================================================
-    # 即时警报（涨/跌）
+    # 分类工具
+    # ============================================================
+
+    def _category(self, symbol):
+        if symbol in self.stock_symbols:
+            return "tradfi"
+        return "crypto"
+
+    def _threshold(self, symbol):
+        return self.min_quote_volume[self._category(symbol)]
+
+    def _levels(self, symbol, direction):
+        return self.alert_levels[self._category(symbol)][direction]
+
+    # ============================================================
+    # 即时警报
     # ============================================================
 
     def _build_alert_message(self, symbol, interval, change, price, emoji):
-        # 查询成交额
         qv = get_quote_volume(symbol)
         qv_str = format_volume(qv)
 
-        # 硬门槛：成交额不达标，直接返回 None，不推送
-        if qv is None or qv < self.min_quote_volume:
+        if qv is None or qv < self._threshold(symbol):
             return None
 
-        # 方向符号与箭头
         if change > 0:
-            arrow = "\U0001F4C8"   # 📈
+            arrow = "\U0001F4C8"
             sign = "+"
         else:
-            arrow = "\U0001F4C9"   # 📉
+            arrow = "\U0001F4C9"
             sign = ""
 
         price_str = format_price(price)
 
-        # 单行精简格式
         msg = "{0} {1} | {2} | \U0001F30A{3} {4}{5}{6:.2f}% | \U0001F4B2{7}".format(
             emoji,
             strip_usdt(symbol),
@@ -119,9 +134,7 @@ class ReportGenerator:
             price_str,
         )
 
-        # ===== 链接（暂时注释，需要时去掉注释即可）=====
         # msg += "\n\nOpen in [Binance Spot](https://www.binance.com/en/trade/{0})".format(symbol)
-        # ================================================
 
         return msg
 
@@ -141,19 +154,13 @@ class ReportGenerator:
             return
         self.telegram.send_message(msg, is_alert_chat=False)
 
-    # ============================================================
-    # 新上市通知
-    # ============================================================
-
     def send_new_listings(self, symbols_to_add):
         message = """\
 *New Listings*
 {0} new pairs found, adding to monitored list.
 
 *Adding Pairs:*\
-            """.format(
-            len(symbols_to_add)
-        )
+            """.format(len(symbols_to_add))
 
         message += "\n"
         for symbol in symbols_to_add:
@@ -162,7 +169,7 @@ class ReportGenerator:
         self.telegram.send_news_message(message, is_alert_chat=True)
 
     # ============================================================
-    # 分档即时警报（涨跌对称，档位只升不降）
+    # 分档即时警报（按分类走不同档位）
     # ============================================================
 
     def send_pump_dump_message(
@@ -176,11 +183,11 @@ class ReportGenerator:
         for interval in chart_intervals:
             change = asset[interval]["change_current"]
 
-            # ===== 涨侧分档 =====
+            # 涨侧
             target_up = 0
-            for lv in sorted(self.alert_levels.get("up", [])):
+            for lv in sorted(self._levels(asset["symbol"], "up")):
                 if change >= lv:
-                    target_up = int(lv * 100)
+                    target_up = int(lv * 1000)
                 else:
                     break
 
@@ -189,14 +196,14 @@ class ReportGenerator:
                 self.send_pump_message(asset["symbol"], interval, change, price)
                 asset["push_level_up"] = target_up
 
-            # ===== 跌侧分档 =====
+            # 跌侧
             if not dump_enabled:
                 continue
 
             target_down = 0
-            for lv in sorted(self.alert_levels.get("down", []), reverse=True):
+            for lv in sorted(self._levels(asset["symbol"], "down"), reverse=True):
                 if change <= -lv:
-                    target_down = int(lv * 100)
+                    target_down = int(lv * 1000)
                 else:
                     break
 
@@ -206,17 +213,18 @@ class ReportGenerator:
                 asset["push_level_down"] = target_down
 
     # ============================================================
-    # 市场统计（全口径，全697个币，按指定窗口）
+    # 统计
     # ============================================================
 
-    def _market_statistics(self, assets, interval):
-        """返回 (avg_change, up_count, down_count)，全口径，不分成交流动性。"""
+    def _market_statistics(self, assets, interval, category):
         up = 0
         down = 0
         sum_change = 0.0
         total = 0
 
         for asset in assets:
+            if self._category(asset["symbol"]) != category:
+                continue
             change = asset[interval]["change_current"]
             sum_change += change
             total += 1
@@ -227,16 +235,41 @@ class ReportGenerator:
 
         if total == 0:
             return 0.0, 0, 0
+        return sum_change / total, up, down
 
-        avg_change = sum_change / total
-        return avg_change, up, down
+    def _market_statistics_1h(self, assets, one_hour_points, category):
+        up = 0
+        down = 0
+        sum_change = 0.0
+        total = 0
+
+        for asset in assets:
+            if self._category(asset["symbol"]) != category:
+                continue
+            ps = asset["price"]
+            if len(ps) < one_hour_points:
+                continue
+            old = ps[-one_hour_points]
+            if old == 0:
+                continue
+            change = (ps[-1] - old) / old
+            sum_change += change
+            total += 1
+            if change > 0:
+                up += 1
+            elif change < 0:
+                down += 1
+
+        if total == 0:
+            return 0.0, 0, 0
+        return sum_change / total, up, down
 
     # ============================================================
-    # 15分钟汇总报告
+    # 15分钟汇总
     # ============================================================
 
     def send_summary_report(self, assets, chart_intervals, summary_config):
-        min_change = summary_config.get("min_change", 0.05)
+        min_change = summary_config.get("min_change", 0.025)
         max_coins = summary_config.get("max_coins", 20)
         interval = list(chart_intervals.keys())[0]
 
@@ -244,9 +277,12 @@ class ReportGenerator:
         downs = []
         for asset in assets:
             change = asset[interval]["change_current"]
-            if change >= min_change:
+            cat = self._category(asset["symbol"])
+            # 用该分类的最低档作为入榜门槛
+            base = min(self.alert_levels[cat]["up"])
+            if change >= base:
                 ups.append((asset["symbol"], change))
-            elif change <= -min_change:
+            elif change <= -base:
                 downs.append((asset["symbol"], change))
 
         ups.sort(key=lambda x: x[1], reverse=True)
@@ -254,7 +290,7 @@ class ReportGenerator:
 
         def fmt_line(sym, chg):
             qv = get_quote_volume(sym)
-            if qv is None or qv < self.min_quote_volume:
+            if qv is None or qv < self._threshold(sym):
                 return None
             qv_str = format_volume(qv)
             sign = "+" if chg > 0 else ""
@@ -287,52 +323,56 @@ class ReportGenerator:
         else:
             lines.append("  （无）")
 
-        # ===== Market Average 统计（全口径）=====
-        avg_change, up_count, down_count = self._market_statistics(assets, interval)
+        # 分类统计
+        avg_c, up_c, dn_c = self._market_statistics(assets, interval, "crypto")
+        avg_t, up_t, dn_t = self._market_statistics(assets, interval, "tradfi")
+
         lines.append("")
-        lines.append("\U0001F4CA Market Average: {0:+.2f}%".format(avg_change * 100))
-        lines.append("\U0001F7E2 {0} / \U0001F534 {1}".format(up_count, down_count))
-        # ==========================================
+        lines.append("━━━━━━━━━━━━━━━")
+        lines.append("\U0001F4CA Crypto Market Average: {0:+.2f}%".format(avg_c * 100))
+        lines.append("\U0001F7E2 {0} / \U0001F534 {1}".format(up_c, dn_c))
+        lines.append("")
+        lines.append("\U0001F4CA TradFi Market Average: {0:+.2f}%".format(avg_t * 100))
+        lines.append("\U0001F7E2 {0} / \U0001F534 {1}".format(up_t, dn_t))
 
         self.telegram.send_report_message("\n".join(lines))
 
     # ============================================================
-    # 1小时榜单（整点必发，独立）
+    # 1小时榜单
     # ============================================================
 
     def send_hourly_report(self, assets, chart_intervals, extract_interval, hourly_config):
-        min_change = hourly_config.get("min_change", 0.10)
+        min_change = hourly_config.get("min_change", {"crypto": 0.10, "tradfi": 0.05})
         max_coins = hourly_config.get("max_coins", 10)
         interval = list(chart_intervals.keys())[0]
 
         one_hour_points = 3600 // extract_interval
 
-        # 检查数据是否足够（用第一个资产判断）
         data_enough = False
         if assets:
             data_enough = len(assets[0]["price"]) >= one_hour_points
 
-        # 数据不够：只发提示
         if not data_enough:
             lines = ["\u23F0 *1\u5c0f\u65f6\u699c\u5355*", ""]
             lines.append("\U0001F4CA 数据积累中...")
             self.telegram.send_report_message("\n".join(lines))
             return
 
-        # 算1小时窗口的涨跌幅
         ups = []
         downs = []
         for asset in assets:
-            price_series = asset["price"]
-            if len(price_series) < one_hour_points:
+            ps = asset["price"]
+            if len(ps) < one_hour_points:
                 continue
-            old_price = price_series[-one_hour_points]
-            if old_price == 0:
+            old = ps[-one_hour_points]
+            if old == 0:
                 continue
-            change = (price_series[-1] - old_price) / old_price
-            if change >= min_change:
+            change = (ps[-1] - old) / old
+            cat = self._category(asset["symbol"])
+            threshold = min_change[cat]
+            if change >= threshold:
                 ups.append((asset["symbol"], change))
-            elif change <= -min_change:
+            elif change <= -threshold:
                 downs.append((asset["symbol"], change))
 
         ups.sort(key=lambda x: x[1], reverse=True)
@@ -340,7 +380,7 @@ class ReportGenerator:
 
         def fmt_line(sym, chg):
             qv = get_quote_volume(sym)
-            if qv is None or qv < self.min_quote_volume:
+            if qv is None or qv < self._threshold(sym):
                 return None
             qv_str = format_volume(qv)
             sign = "+" if chg > 0 else ""
@@ -360,104 +400,53 @@ class ReportGenerator:
 
         lines = ["\u23F0 *1\u5c0f\u65f6\u699c\u5355*", ""]
 
-        # 只在有内容时才显示榜单；没内容直接跳过
         if up_lines:
             lines.append("\U0001F4C8 *1h \u6da8\u5e45\u699c*")
             lines.extend(up_lines)
             lines.append("")
-
         if down_lines:
             lines.append("\U0001F4C9 *1h \u8dcc\u5e45\u699c*")
             lines.extend(down_lines)
 
-        # ===== Market Average 统计（1小时窗口，全口径）=====
-        avg_change, up_count, down_count = self._market_statistics_1h(
-            assets, one_hour_points
-        )
+        avg_c, up_c, dn_c = self._market_statistics_1h(assets, one_hour_points, "crypto")
+        avg_t, up_t, dn_t = self._market_statistics_1h(assets, one_hour_points, "tradfi")
+
         lines.append("")
-        lines.append("\U0001F4CA Market Average: {0:+.2f}%".format(avg_change * 100))
-        lines.append("\U0001F7E2 {0} / \U0001F534 {1}".format(up_count, down_count))
-        # =====================================================
+        lines.append("━━━━━━━━━━━━━━━")
+        lines.append("\U0001F4CA Crypto 1h Average: {0:+.2f}%".format(avg_c * 100))
+        lines.append("\U0001F7E2 {0} / \U0001F534 {1}".format(up_c, dn_c))
+        lines.append("")
+        lines.append("\U0001F4CA TradFi 1h Average: {0:+.2f}%".format(avg_t * 100))
+        lines.append("\U0001F7E2 {0} / \U0001F534 {1}".format(up_t, dn_t))
 
         self.telegram.send_report_message("\n".join(lines))
 
-    def _market_statistics_1h(self, assets, one_hour_points):
-        """全口径1小时窗口统计。"""
-        up = 0
-        down = 0
-        sum_change = 0.0
-        total = 0
-
-        for asset in assets:
-            price_series = asset["price"]
-            if len(price_series) < one_hour_points:
-                continue
-            old_price = price_series[-one_hour_points]
-            if old_price == 0:
-                continue
-            change = (price_series[-1] - old_price) / old_price
-            sum_change += change
-            total += 1
-            if change > 0:
-                up += 1
-            elif change < 0:
-                down += 1
-
-        if total == 0:
-            return 0.0, 0, 0
-
-        avg_change = sum_change / total
-        return avg_change, up, down
-
     # ============================================================
-    # Top Pump & Dump 统计报告（原版保留）
+    # Top Pump & Dump（保留原版）
     # ============================================================
 
     def send_top_pump_dump_statistics_report(
-        self,
-        assets,
-        interval,
-        top_pump_enabled=True,
-        top_dump_enabled=True,
-        additional_stats_enabled=True,
-        no_of_reported_coins=5,
+        self, assets, interval,
+        top_pump_enabled=True, top_dump_enabled=True,
+        additional_stats_enabled=True, no_of_reported_coins=5,
     ):
-
         if not top_pump_enabled or not top_dump_enabled:
             return
 
         message = "*[{0} Interval]*\n\n".format(interval)
 
         if top_pump_enabled:
-            pump_sorted_list = sorted(
-                assets,
-                key=lambda item: item[interval]["change_current"],
-                reverse=True,
-            )[0:no_of_reported_coins]
-
-            message += "{0} *Top {1} Pumps*\n".format(
-                self.pump_emoji, no_of_reported_coins
-            )
-
-            for asset in pump_sorted_list:
-                message += "- {0}: _{1:.2f}_%\n".format(
-                    strip_usdt(asset["symbol"]), asset[interval]["change_current"] * 100
-                )
+            lst = sorted(assets, key=lambda item: item[interval]["change_current"], reverse=True)[0:no_of_reported_coins]
+            message += "{0} *Top {1} Pumps*\n".format(self.pump_emoji, no_of_reported_coins)
+            for asset in lst:
+                message += "- {0}: _{1:.2f}_%\n".format(strip_usdt(asset["symbol"]), asset[interval]["change_current"] * 100)
             message += "\n"
 
         if top_dump_enabled:
-            dump_sorted_list = sorted(
-                assets, key=lambda item: item[interval]["change_current"]
-            )[0:no_of_reported_coins]
-
-            message += "{0} *Top {1} Dumps*\n".format(
-                self.dump_emoji, no_of_reported_coins
-            )
-
-            for asset in dump_sorted_list:
-                message += "- {0}: _{1:.2f}_%\n".format(
-                    strip_usdt(asset["symbol"]), asset[interval]["change_current"] * 100
-                )
+            lst = sorted(assets, key=lambda item: item[interval]["change_current"])[0:no_of_reported_coins]
+            message += "{0} *Top {1} Dumps*\n".format(self.dump_emoji, no_of_reported_coins)
+            for asset in lst:
+                message += "- {0}: _{1:.2f}_%\n".format(strip_usdt(asset["symbol"]), asset[interval]["change_current"] * 100)
 
         if additional_stats_enabled:
             if top_pump_enabled or top_dump_enabled:
@@ -470,21 +459,13 @@ class ReportGenerator:
         up = 0
         down = 0
         sum_change = 0
-
         for asset in assets:
             if asset[interval]["change_current"] > 0:
                 up += 1
             elif asset[interval]["change_current"] < 0:
                 down += 1
-
             sum_change += asset[interval]["change_current"]
-
         avg_change = sum_change / len(assets)
-
         return "*Average Change:* {0:.2f}%\n {1} {2} / {3} {4}".format(
-            avg_change * 100,
-            self.pump_emoji,
-            up,
-            self.dump_emoji,
-            down,
+            avg_change * 100, self.pump_emoji, up, self.dump_emoji, down,
         )

@@ -28,10 +28,9 @@ class BinancePumpAndDumpAlerter:
         top_report_nearest_hour,
         telegram,
         report_generator,
-        # ===== 新增：涨跌分档配置的参数 =====
-        alert_levels,
         summary_config,
-        hourly_report_config,   # ← 新增
+        hourly_report_config,
+        stock_symbols,
     ):
         self.api_url = api_url
         self.watchlist = watchlist
@@ -49,13 +48,13 @@ class BinancePumpAndDumpAlerter:
         self.check_new_listing_enabled = check_new_listing_enabled
         self.telegram = telegram
         self.report_generator = report_generator
-        # ===== 新增：涨跌分档配置 + 上次汇总时间 =====
-        self.alert_levels = alert_levels
+
         self.summary_config = summary_config
-        self.hourly_report_config = hourly_report_config   # ← 新增
+        self.hourly_report_config = hourly_report_config
         self.last_summary_time = int(time.time())
-        self.last_hourly_report_time = int(time.time())    # ← 新增
-        # ============================================
+        self.last_hourly_report_time = int(time.time())
+        self.stock_symbols = stock_symbols
+
         self.logger = logging.getLogger("pump-and-dump-alerter")
 
         self.initial_time = int(time.time())
@@ -75,7 +74,6 @@ class BinancePumpAndDumpAlerter:
         for interval in top_report_intervals:
             self.top_report_intervals[interval] = {}
 
-            # Determine initial start time for TPD. Should conveniently solve original 0% issue together.
             if top_report_nearest_hour:
                 self.top_report_intervals[interval]["start"] = nearest_hour
             else:
@@ -95,7 +93,6 @@ class BinancePumpAndDumpAlerter:
     def create_new_asset(symbol, chart_intervals):
         asset = {"symbol": symbol, "price": [], "volume": []}
 
-        # 新增：涨跌两侧的已推档位（0表示还没推过任何档）
         asset["push_level_up"] = 0
         asset["push_level_down"] = 0
 
@@ -119,25 +116,38 @@ class BinancePumpAndDumpAlerter:
                 e,
                 exc_info=True,
             )
-            sleep(5)  # Sleep 5s and try again
+            sleep(5)
             return self.retrieve_exchange_assets(api_url)
 
+    def fetch_stock_symbols(self):
+        """从币安合约 exchangeInfo 拉取所有非加密货币的交易对（TradFi）。"""
+        try:
+            url = "https://fapi.binance.com/fapi/v1/exchangeInfo"
+            resp = requests.get(url, timeout=10).json()
+            symbols = set()
+            for s in resp.get("symbols", []):
+                ut = s.get("underlyingType")
+                if ut is not None and ut != "COIN":
+                    symbols.add(s["symbol"])
+            self.logger.info("【分类】拉取到 %d 个 TradFi 合约。", len(symbols))
+            return symbols
+        except Exception as e:
+            self.logger.error("【分类】拉取 TradFi 合约列表失败：%s", e)
+            return set()
+
     def is_symbol_valid(self, symbol, watchlist, blacklist, pairs_of_interest):
-        # Filter symbols in watchlist if set - This disables the pairsOfInterest feature
         if len(watchlist) > 0:
             if symbol not in watchlist:
                 self.logger.debug("Ignoring symbol not in watchlist: %s.", symbol)
                 return False
             return True
 
-        # Filter symbols in blacklist if set - This DOES NOT IMPACT the pairsOfInterest feature
         if len(blacklist) > 0:
             if symbol in blacklist:
                 self.logger.info(
                     "Ignoring symbol found in blacklist: %s.", symbol)
                 return False
 
-        # Filter pairsOfInterest to reduce the noise. E.g. BUSD, USDT, ETH, BTC
         is_in_pairs_of_interest = False
         for pair in pairs_of_interest:
             if symbol.endswith(pair):
@@ -148,7 +158,6 @@ class BinancePumpAndDumpAlerter:
             self.logger.debug("Ignoring symbol not in pairsOfInterests: %s.", symbol)
             return False
 
-        # Filter leverage symbols
         for pair in pairs_of_interest:
             coin = symbol.replace(pair, "")
             if (
@@ -165,13 +174,11 @@ class BinancePumpAndDumpAlerter:
     def filter_and_convert_assets(self, exchange_assets, watchlist, blacklist, pairs_of_interest, chart_intervals):
         filtered_assets = []
 
-        # 保护层1：如果拉回来的不是列表，直接返回空列表
         if not isinstance(exchange_assets, list):
             self.logger.error("拉取到的资产数据不是列表，本次跳过。")
             return filtered_assets
 
         for exchange_asset in exchange_assets:
-            # 保护层2：如果单个资产是字符串，尝试解析，失败就跳过
             if isinstance(exchange_asset, str):
                 import json
                 try:
@@ -180,7 +187,6 @@ class BinancePumpAndDumpAlerter:
                     self.logger.error(f"解析资产数据失败: {e}")
                     continue
 
-            # 保护层3：如果解析后还不是字典，跳过
             if not isinstance(exchange_asset, dict):
                 self.logger.error("资产数据格式异常，跳过。")
                 continue
@@ -233,7 +239,6 @@ class BinancePumpAndDumpAlerter:
         for interval in chart_intervals:
             data_points = chart_intervals[interval]["value"] // extract_interval
 
-            # If data is not enough yet after restart for interval, stop here.
             if data_points >= asset_length:
                 self.logger.debug(
                     "Not enough datapoints (%s/%s) for interval: %s",
@@ -243,7 +248,6 @@ class BinancePumpAndDumpAlerter:
                 )
                 break
 
-            # Gets change in % from last alert trigger.
             current_price = asset["price"][-1]
             if current_price == 0:
                 self.logger.warning(
@@ -262,10 +266,7 @@ class BinancePumpAndDumpAlerter:
                 change,
             )
 
-            # Set last change for next interval iteration
             asset[interval]["change_last"] = asset[interval]["change_current"]
-
-            # Stores change for the current interval into asset dict.
             asset[interval]["change_current"] = change
 
         return asset
@@ -285,13 +286,11 @@ class BinancePumpAndDumpAlerter:
             self.logger.debug(message)
             self.telegram.send_generic_message(message, is_alert_chat=True)
 
-            # Do not delete everything, only elements older than the last monitored interval
             lastInterval = "1s"
             for interval in chart_intervals:
                 lastInterval = interval
 
             data_points = chart_intervals[lastInterval]["value"] // extract_interval
-            # 保证至少保留1小时的数据（用于1小时榜单）
             one_hour_points = 3600 // extract_interval
             data_points = max(data_points, one_hour_points)
 
@@ -312,13 +311,11 @@ class BinancePumpAndDumpAlerter:
         pairs_of_interest,
         chart_intervals,
     ):
-        # 保护层：如果 initial_assets 不是列表，直接跳过
         if not isinstance(initial_assets, list):
             self.logger.error("initial_assets 不是列表，跳过新币检查。")
             return filtered_assets
-        
+
         if len(initial_assets) >= len(exchange_assets):
-            # If initial_assets has more than assets we just ignore it
             self.logger.debug("No new listing found.")
             return filtered_assets
 
@@ -354,17 +351,13 @@ class BinancePumpAndDumpAlerter:
         additional_stats_enabled,
         no_of_reported_coins,
     ):
-
         for interval in top_report_intervals:
-
             if (
                 current_time
                 > top_report_intervals[interval]["start"]
                 + top_report_intervals[interval]["value"]
                 + 1
             ):
-            
-                # Update time for new trigger, rounded down to nearest interval. Avoid delay over time.
                 top_report_intervals[interval]["start"] = current_time - (current_time % ConversionUtils.duration_to_seconds(interval))
 
                 self.logger.debug(
@@ -381,6 +374,7 @@ class BinancePumpAndDumpAlerter:
                 )
 
     def run(self):
+        self.stock_symbols = self.fetch_stock_symbols()
 
         initial_assets = self.retrieve_exchange_assets(self.api_url)
 
@@ -417,7 +411,6 @@ class BinancePumpAndDumpAlerter:
                     self.pairs_of_interest,
                     self.chart_intervals,
                 )
-                # Reset initial exchange asset
                 initial_assets = exchange_assets
 
             self.update_all_monitored_assets_and_send_news_messages(
@@ -453,23 +446,19 @@ class BinancePumpAndDumpAlerter:
             if self.summary_config.get("enabled", False):
                 now = loop_time
                 minute = (now // 60) % 60
-                # 整点分钟：0, 15, 30, 45
                 if minute in (0, 15, 30, 45):
-                    # 距离上次汇总超过14分钟才触发，防止同一分钟内多次触发
                     if now - self.last_summary_time >= 14 * 60:
                         self.report_generator.send_summary_report(
                             filtered_assets,
                             self.chart_intervals,
                             self.summary_config,
                         )
-                        # 重置所有币的档位
                         for asset in filtered_assets:
                             asset["push_level_up"] = 0
                             asset["push_level_down"] = 0
                         self.last_summary_time = now
-            # ================================================
 
-            # ===== 每小时整点，检查1小时榜单（有内容才发）=====
+            # ===== 每小时整点，1小时榜单 =====
             if self.hourly_report_config.get("enabled", False):
                 now = loop_time
                 minute = (now // 60) % 60
@@ -482,9 +471,7 @@ class BinancePumpAndDumpAlerter:
                             self.hourly_report_config,
                         )
                         self.last_hourly_report_time = now
-            # ================================================
-            
-            # Sleeps for the remainder of 1s, or loops through if extraction takes longer
+
             end_loop_time = time.time()
 
             self.logger.info(
