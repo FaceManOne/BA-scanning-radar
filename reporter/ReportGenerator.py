@@ -67,21 +67,30 @@ class ReportGenerator:
         if qv is None or qv < self.min_quote_volume:
             return None
 
-        vol_block = "💰 24h Volume: {0} USDT".format(qv_str)
+        # 方向符号与箭头
+        if change > 0:
+            arrow = "\U0001F4C8"   # 📈
+            sign = "+"
+        else:
+            arrow = "\U0001F4C9"   # 📉
+            sign = ""
 
-        return """\
-{0} *{1} [{2} Interval]* | Change: _{3:.3f}%_
-
-{4}
-
-Open in [Binance Spot](https://www.binance.com/en/trade/{1})\
-        """.format(
+        # 单行精简格式
+        msg = "{0} {1} | {2} | \U0001F30A{3} {4}{5}{6:.2f}%".format(
             emoji,
             symbol,
             interval,
+            qv_str,
+            arrow,
+            sign,
             change * 100,
-            vol_block,
         )
+
+        # ===== 链接（暂时注释，需要时去掉注释即可）=====
+        # msg += "\n\nOpen in [Binance Spot](https://www.binance.com/en/trade/{0})".format(symbol)
+        # ================================================
+
+        return msg
 
     def send_pump_message(self, symbol, interval, change, price):
         msg = self._build_alert_message(
@@ -230,7 +239,6 @@ Open in [Binance Spot](https://www.binance.com/en/trade/{1})\
         max_coins = hourly_config.get("max_coins", 10)
         interval = list(chart_intervals.keys())[0]
 
-        # 1小时需要的数据点数
         one_hour_points = 3600 // extract_interval
 
         ups = []
@@ -238,7 +246,7 @@ Open in [Binance Spot](https://www.binance.com/en/trade/{1})\
         for asset in assets:
             price_series = asset["price"]
             if len(price_series) < one_hour_points:
-                continue  # 数据不够，跳过
+                continue
             old_price = price_series[-one_hour_points]
             if old_price == 0:
                 continue
@@ -248,7 +256,6 @@ Open in [Binance Spot](https://www.binance.com/en/trade/{1})\
             elif change <= -min_change:
                 downs.append((asset["symbol"], change))
 
-        # 没有内容就不发
         if not ups and not downs:
             return
 
@@ -263,7 +270,6 @@ Open in [Binance Spot](https://www.binance.com/en/trade/{1})\
             sign = "+" if chg > 0 else ""
             return "  {0} {1}{2:.2f}%  |  {3}".format(sym, sign, chg * 100, qv_str)
 
-        # 先过滤 None，再判断是否有内容
         up_lines = []
         for sym, chg in ups[:max_coins]:
             line = fmt_line(sym, chg)
@@ -276,7 +282,6 @@ Open in [Binance Spot](https://www.binance.com/en/trade/{1})\
             if line is not None:
                 down_lines.append(line)
 
-        # 成交额过滤后全空，就不发
         if not up_lines and not down_lines:
             return
 
