@@ -85,3 +85,16 @@ BPA is a simple application which gets the price data from Binance Spot or Futur
 1. Major Refactoring and cleanup (Thanks to [@patbaumgartner](https://github.com/patbaumgartner))
 1. Thanks to [@zakimzf](https://github.com/zakimzf) — I discovered this project through his repository.
 1. Blacklist feature
+
+## New features
+
+- Need to run for full 14 mins to qualify for the 15min leaderboard
+- Need to run for full 59 mins to qualify for the 1h leaderboard
+- Compare against locally stored data
+- Tiered push alerts (5%/10%/15%, symmetric up/down)
+- Tiers only upgrade, reset every 15 minutes
+- Hourly summary report (trigger at 0/15/30/45 min)
+- Volume query (single-coin query for triggered symbol)
+- 5 million USDT threshold
+- Strikethrough for non-qualified items, ✅ for qualified items
+- 1h leaderboard
