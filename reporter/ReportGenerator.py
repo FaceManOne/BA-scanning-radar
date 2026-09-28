@@ -304,7 +304,8 @@ class ReportGenerator:
             sign = "+" if chg > 0 else ""
             return "  {0} {1}{2:.2f}%  |  {3}".format(strip_usdt(sym), sign, chg * 100, qv_str)
 
-        lines = ["\U0001F4CA *15分钟汇总报告*", ""]
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        lines = ["\U0001F4CA *15分钟汇总报告* | {0}".format(now_str), ""]
 
         up_lines = []
         for sym, chg in ups[:max_coins]:
@@ -364,7 +365,8 @@ class ReportGenerator:
             data_enough = len(assets[0]["price"]) >= one_hour_points
 
         if not data_enough:
-            lines = ["\u23F0 *1\u5c0f\u65f6\u699c\u5355*", ""]
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+            lines = ["\u23F0 *1\u5c0f\u65f6\u699c\u5355* | {0}".format(now_str), ""]
             lines.append("\U0001F4CA 数据积累中...")
             self.telegram.send_report_message("\n".join(lines))
             return
@@ -409,7 +411,8 @@ class ReportGenerator:
             if line is not None:
                 down_lines.append(line)
 
-        lines = ["\u23F0 *1\u5c0f\u65f6\u699c\u5355*", ""]
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        lines = ["\u23F0 *1\u5c0f\u65f6\u699c\u5355* | {0}".format(now_str), ""]
 
         if up_lines:
             lines.append("\U0001F4C8 *1h \u6da8\u5e45\u699c*")
