@@ -1,0 +1,4 @@
+colorlog
+requests
+pyyaml
+python-telegram-bot==13.13
