@@ -69,6 +69,7 @@ class ReportGenerator:
         alert_levels=None,
         min_quote_volume=None,
         stock_symbols=None,
+        email_sender=None,
         pump_emoji="\U0001F7E2",  # 🟢
         dump_emoji="\U0001F534",  # 🔴
     ):
@@ -91,6 +92,7 @@ class ReportGenerator:
         self.min_quote_volume = min_quote_volume
 
         self.stock_symbols = stock_symbols or set()
+        self.email_sender = email_sender
 
         self.logger = logging.getLogger("report-generator")
 
@@ -343,6 +345,9 @@ class ReportGenerator:
 
         self.telegram.send_report_message("\n".join(lines))
 
+        if self.email_sender:
+            self.email_sender.send("15分钟汇总报告", "\n".join(lines))
+
     # ============================================================
     # 1小时榜单
     # ============================================================
@@ -426,6 +431,9 @@ class ReportGenerator:
         lines.append("\U0001F7E2 {0} / \U0001F534 {1}".format(up_t, dn_t))
 
         self.telegram.send_report_message("\n".join(lines))
+
+        if self.email_sender:
+            self.email_sender.send("1小时榜单", "\n".join(lines))
 
     # ============================================================
     # Top Pump & Dump（保留原版）

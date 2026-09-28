@@ -6,6 +6,7 @@ import requests
 from alerter import BinancePumpAndDumpAlerter
 from reporter import ReportGenerator
 from sender import TelegramSender
+from sender.EmailSender import EmailSender
 from utils import ConversionUtils
 
 # Read config
@@ -67,8 +68,21 @@ def main():
         logger.error("【分类】拉取股票合约列表失败：%s", e)
         stock_symbols = set()
 
+    # 构造邮件发送器
+    if config.get("emailEnabled", False):
+        email_sender = EmailSender(
+            smtp_server=config["emailSmtpServer"],
+            smtp_port=config["emailSmtpPort"],
+            sender_email=config["emailSender"],
+            auth_code=config["emailAuthCode"],
+            receiver_email=config["emailReceiver"],
+        )
+    else:
+        email_sender = None
+
     reporter = ReportGenerator(
         telegram=telegram,
+        email_sender=email_sender,
         alert_skip_threshold=config["alertSkipThreshold"],
         alert_levels=config.get("alertLevels", {
             "crypto": {"up": [0.025, 0.05, 0.075], "down": [0.025, 0.05, 0.075]},
