@@ -52,6 +52,13 @@ def format_price(price):
         return s
 
 
+def strip_usdt(symbol):
+    """去掉 USDT 后缀，只针对 USDT 结尾的币种。"""
+    if symbol.endswith("USDT"):
+        return symbol[:-4]
+    return symbol
+
+
 class ReportGenerator:
     def __init__(
         self,
@@ -103,7 +110,7 @@ class ReportGenerator:
         # 单行精简格式
         msg = "{0} {1} | {2} | \U0001F30A{3} {4}{5}{6:.2f}% | \U0001F4B2{7}".format(
             emoji,
-            symbol,
+            strip_usdt(symbol),
             interval,
             qv_str,
             arrow,
@@ -251,7 +258,7 @@ class ReportGenerator:
                 return None
             qv_str = format_volume(qv)
             sign = "+" if chg > 0 else ""
-            return "  {0} {1}{2:.2f}%  |  {3}".format(sym, sign, chg * 100, qv_str)
+            return "  {0} {1}{2:.2f}%  |  {3}".format(strip_usdt(sym), sign, chg * 100, qv_str)
 
         lines = ["\U0001F4CA *15分钟汇总报告*", ""]
 
@@ -337,7 +344,7 @@ class ReportGenerator:
                 return None
             qv_str = format_volume(qv)
             sign = "+" if chg > 0 else ""
-            return "  {0} {1}{2:.2f}%  |  {3}".format(sym, sign, chg * 100, qv_str)
+            return "  {0} {1}{2:.2f}%  |  {3}".format(strip_usdt(sym), sign, chg * 100, qv_str)
 
         up_lines = []
         for sym, chg in ups[:max_coins]:
@@ -434,7 +441,7 @@ class ReportGenerator:
 
             for asset in pump_sorted_list:
                 message += "- {0}: _{1:.2f}_%\n".format(
-                    asset["symbol"], asset[interval]["change_current"] * 100
+                    strip_usdt(asset["symbol"]), asset[interval]["change_current"] * 100
                 )
             message += "\n"
 
@@ -449,7 +456,7 @@ class ReportGenerator:
 
             for asset in dump_sorted_list:
                 message += "- {0}: _{1:.2f}_%\n".format(
-                    asset["symbol"], asset[interval]["change_current"] * 100
+                    strip_usdt(asset["symbol"]), asset[interval]["change_current"] * 100
                 )
 
         if additional_stats_enabled:
