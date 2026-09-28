@@ -1,0 +1,76 @@
+# Binance Pump and Dump Alert Configuration
+
+# Using Spot API with url set to https://api.binance.com/api/v3/ticker/price
+# Using Futures API with url set to: https://fapi.binance.com/fapi/v1/ticker/price
+apiUrl: https://api.binance.com/api/v3/ticker/price
+
+chartIntervals:
+  - 15m
+
+outlierIntervals:
+  "15m": 0.025
+
+alertLevels:
+  up:
+    - 0.025
+    - 0.05
+    - 0.075
+  down:
+    - 0.025
+    - 0.05
+    - 0.075
+
+summaryEnabled: True
+summaryMinChange: 0.05
+summaryMaxCoins: 20
+# 1小时榜单（整点检查，有内容才发）
+hourlyReportEnabled: True
+hourlyReportMinChange: 0.10
+hourlyReportMaxCoins: 10
+minQuoteVolume: 5000000
+
+
+telegramToken: your tokne
+telegramChatId: your id
+telegramAlertChatId: 0
+
+# 扫描间隔
+extractInterval: 20s
+
+blacklist:
+  - NBTUSDT
+
+pairsOfInterest:
+  - USDT
+
+dumpEnabled: True
+
+topPumpEnabled: False
+topDumpEnabled: False
+additionalStatsEnabled: False
+noOfReportedCoins: 5
+topReportIntervals:
+  - 3h
+  - 6h
+
+# Define your own bot emojis.
+botEmoji: ! "\U0001F916" # 🤖
+pumpEmoji: ! "\U0001F7E2" # 🟢 or '\U0001F4C8' 📈 '\U0001F53C'🔼
+dumpEmoji: ! "\U0001F534" # 🔴 or '\U0001F4C9' 📉 '\U0001F53D'🔽
+topEmoji: ! "\U0001F3C6" # 🏆
+newsEmoji: ! "\U0001F4F0" # 📰 or '\U0001F680' 🚀
+
+# Debug Params (Avoid touching it if there's no issues)
+
+# If False we do not print unnecessary messages
+debug: False
+# Skip alert at higher timeframes when change in % did not change value by threshold in percentage points
+alertSkipThreshold: 0.75
+# Interval for clearing array to prevent memory can handle up to 12h+ depending on system
+resetInterval: 12h
+# In the case of get price fail, this is the time delay before re-attempt
+priceRetryInterval: 5s
+# Disables checking and adding of new listing pairs
+checkNewListingEnabled: True
+# Disables rounding to nearest hour for first TPD if false
+topReportNearestHour: True
