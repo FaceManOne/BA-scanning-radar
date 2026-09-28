@@ -83,4 +83,5 @@ BPA is a simple application which gets the price data from Binance Spot or Futur
 1. Docker integration (Thanks to [@patbaumgartner](https://github.com/patbaumgartner))
 1. Logging integration (Thanks to [@patbaumgartner](https://github.com/patbaumgartner))
 1. Major Refactoring and cleanup (Thanks to [@patbaumgartner](https://github.com/patbaumgartner))
+1. Thanks to [@zakimzf](https://github.com/zakimzf) — I discovered this project through his repository.
 1. Blacklist feature
