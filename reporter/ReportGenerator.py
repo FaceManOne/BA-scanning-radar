@@ -6,7 +6,7 @@ from datetime import datetime
 
 
 # ============================================================
-# 成交额查询与格式化工具
+# 工具函数
 # ============================================================
 
 def get_quote_volume(symbol):
@@ -26,7 +26,6 @@ def get_quote_volume(symbol):
 
 
 def format_volume(quote_volume):
-    """把成交额格式化为 X.XM 或 <0.1M。"""
     if quote_volume is None:
         return None
     millions = quote_volume / 1_000_000
@@ -36,7 +35,6 @@ def format_volume(quote_volume):
 
 
 def format_price(price):
-    """按规则格式化价格。"""
     try:
         p = float(price)
     except (TypeError, ValueError):
@@ -55,7 +53,6 @@ def format_price(price):
 
 
 def strip_usdt(symbol):
-    """去掉 USDT 后缀。"""
     if symbol.endswith("USDT"):
         return symbol[:-4]
     return symbol
@@ -70,29 +67,31 @@ class ReportGenerator:
         min_quote_volume=None,
         stock_symbols=None,
         email_sender=None,
-        pump_emoji="\U0001F7E2",  # 🟢
-        dump_emoji="\U0001F534",  # 🔴
+        pump_emoji="\U0001F7E2",
+        dump_emoji="\U0001F534",
     ):
         self.telegram = telegram
         self.alert_skip_threshold = alert_skip_threshold
         self.pump_emoji = pump_emoji
         self.dump_emoji = dump_emoji
 
-        # 两套档位
         if alert_levels is None:
             alert_levels = {
                 "crypto": {"up": [0.025, 0.05, 0.075], "down": [0.025, 0.05, 0.075]},
-                "tradfi": {"up": [0.015, 0.03, 0.045], "down": [0.015, 0.03, 0.045]},
+                "tradfi": {"up": [0.015, 0.025, 0.035], "down": [0.015, 0.025, 0.035]},
             }
         self.alert_levels = alert_levels
 
-        # 两套门槛
         if min_quote_volume is None:
             min_quote_volume = {"crypto": 30_000_000, "tradfi": 9_000_000}
         self.min_quote_volume = min_quote_volume
 
         self.stock_symbols = stock_symbols or set()
         self.email_sender = email_sender
+
+        # 记录即时警报（用于汇总追加）
+        self.recent_alerts_15m = []
+        self.recent_alerts_1h = []
 
         self.logger = logging.getLogger("report-generator")
 
@@ -141,9 +140,6 @@ class ReportGenerator:
             change * 100,
             price_str,
         )
-
-        # msg += "\n\nOpen in [Binance Spot](https://www.binance.com/en/trade/{0})".format(symbol)
-
         return msg
 
     def send_pump_message(self, symbol, interval, change, price):
@@ -177,7 +173,7 @@ class ReportGenerator:
         self.telegram.send_news_message(message, is_alert_chat=True)
 
     # ============================================================
-    # 分档即时警报（按分类走不同档位）
+    # 分档即时警报
     # ============================================================
 
     def send_pump_dump_message(
@@ -193,9 +189,10 @@ class ReportGenerator:
 
             # 涨侧
             target_up = 0
-            for lv in sorted(self._levels(asset["symbol"], "up")):
+            up_levels = sorted(self._levels(asset["symbol"], "up"))
+            for idx, lv in enumerate(up_levels):
                 if change >= lv:
-                    target_up = int(lv * 1000)
+                    target_up = idx
                 else:
                     break
 
@@ -204,14 +201,29 @@ class ReportGenerator:
                 self.send_pump_message(asset["symbol"], interval, change, price)
                 asset["push_level_up"] = target_up
 
+                # 记录：用于汇总追加
+                self.recent_alerts_15m.append({
+                    "symbol": asset["symbol"],
+                    "change": change,
+                    "level": target_up,
+                    "direction": "up",
+                })
+                self.recent_alerts_1h.append({
+                    "symbol": asset["symbol"],
+                    "change": change,
+                    "level": target_up,
+                    "direction": "up",
+                })
+
             # 跌侧
             if not dump_enabled:
                 continue
 
             target_down = 0
-            for lv in sorted(self._levels(asset["symbol"], "down"), reverse=True):
+            down_levels = sorted(self._levels(asset["symbol"], "down"), reverse=True)
+            for idx, lv in enumerate(down_levels):
                 if change <= -lv:
-                    target_down = int(lv * 1000)
+                    target_down = idx
                 else:
                     break
 
@@ -219,6 +231,19 @@ class ReportGenerator:
                 price = asset["price"][-1]
                 self.send_dump_message(asset["symbol"], interval, change, price)
                 asset["push_level_down"] = target_down
+
+                self.recent_alerts_15m.append({
+                    "symbol": asset["symbol"],
+                    "change": change,
+                    "level": target_down,
+                    "direction": "down",
+                })
+                self.recent_alerts_1h.append({
+                    "symbol": asset["symbol"],
+                    "change": change,
+                    "level": target_down,
+                    "direction": "down",
+                })
 
     # ============================================================
     # 统计
@@ -273,6 +298,36 @@ class ReportGenerator:
         return sum_change / total, up, down
 
     # ============================================================
+    # 追加区块：曾触及高档位
+    # ============================================================
+
+    def _build_extra_block(self, alerts, min_level):
+        """从 alerts 里筛选出 level >= min_level 的币，去重后返回两组行。"""
+        seen = {}
+        for a in alerts:
+            if a["level"] < min_level:
+                continue
+            sym = a["symbol"]
+            if sym not in seen or abs(a["change"]) > abs(seen[sym]["change"]):
+                seen[sym] = a
+
+        up_lines = []
+        down_lines = []
+        for sym, a in seen.items():
+            sign = "+" if a["change"] > 0 else ""
+            line = "  {0} {1} {2}{3:.2f}%".format(
+                "\U0001F525" * min_level if a["direction"] == "up" else "\u2744\uFE0F" * min_level,
+                strip_usdt(sym),
+                sign,
+                a["change"] * 100,
+            )
+            if a["direction"] == "up":
+                up_lines.append(line)
+            else:
+                down_lines.append(line)
+        return up_lines, down_lines
+
+    # ============================================================
     # 15分钟汇总
     # ============================================================
 
@@ -286,7 +341,6 @@ class ReportGenerator:
         for asset in assets:
             change = asset[interval]["change_current"]
             cat = self._category(asset["symbol"])
-            # 用该分类的最低档作为入榜门槛
             base = min(self.alert_levels[cat]["up"])
             if change >= base:
                 ups.append((asset["symbol"], change))
@@ -319,11 +373,17 @@ class ReportGenerator:
             if line is not None:
                 down_lines.append(line)
 
+        # 追加：过去15分钟触及 >= 第1档 的
+        extra_up, extra_down = self._build_extra_block(self.recent_alerts_15m, 1)
+
         lines.append("\U0001F4C8 *涨幅榜*")
         if up_lines:
             lines.extend(up_lines)
         else:
             lines.append("  （无）")
+        if extra_up:
+            lines.append("  ━━━━━━━━━━━━━━━")
+            lines.extend(extra_up)
 
         lines.append("")
         lines.append("\U0001F4C9 *跌幅榜*")
@@ -331,23 +391,28 @@ class ReportGenerator:
             lines.extend(down_lines)
         else:
             lines.append("  （无）")
+        if extra_down:
+            lines.append("  ━━━━━━━━━━━━━━━")
+            lines.extend(extra_down)
 
-        # 分类统计
+        # 市场潮汐
         avg_c, up_c, dn_c = self._market_statistics(assets, interval, "crypto")
         avg_t, up_t, dn_t = self._market_statistics(assets, interval, "tradfi")
 
         lines.append("")
-        lines.append("━━━━━━━━━━━━━━━")
-        lines.append("\U0001F4CA Crypto Market Average: {0:+.2f}%".format(avg_c * 100))
-        lines.append("\U0001F7E2 {0} / \U0001F534 {1}".format(up_c, dn_c))
-        lines.append("")
-        lines.append("\U0001F4CA TradFi Market Average: {0:+.2f}%".format(avg_t * 100))
-        lines.append("\U0001F7E2 {0} / \U0001F534 {1}".format(up_t, dn_t))
+        lines.append("\U0001F30A *市场潮汐*")
+        lines.append("  Crypto Market Average: {0:+.2f}%".format(avg_c * 100))
+        lines.append("  \U0001F7E2 {0} / \U0001F534 {1}".format(up_c, dn_c))
+        lines.append("  TradFi Market Average: {0:+.2f}%".format(avg_t * 100))
+        lines.append("  \U0001F7E2 {0} / \U0001F534 {1}".format(up_t, dn_t))
 
         self.telegram.send_report_message("\n".join(lines))
 
         if self.email_sender:
             self.email_sender.send("15分钟汇总报告", "\n".join(lines))
+
+        # 清空15分钟记录
+        self.recent_alerts_15m = []
 
     # ============================================================
     # 1小时榜单
@@ -364,8 +429,9 @@ class ReportGenerator:
         if assets:
             data_enough = len(assets[0]["price"]) >= one_hour_points
 
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+
         if not data_enough:
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
             lines = ["\u23F0 *1\u5c0f\u65f6\u699c\u5355* | {0}".format(now_str), ""]
             lines.append("\U0001F4CA 数据积累中...")
             self.telegram.send_report_message("\n".join(lines))
@@ -411,35 +477,51 @@ class ReportGenerator:
             if line is not None:
                 down_lines.append(line)
 
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        # 追加：过去1小时触及 >= 第2档 的
+        extra_up, extra_down = self._build_extra_block(self.recent_alerts_1h, 2)
+
         lines = ["\u23F0 *1\u5c0f\u65f6\u699c\u5355* | {0}".format(now_str), ""]
 
+        lines.append("\U0001F4C8 *1h 涨幅榜*")
         if up_lines:
-            lines.append("\U0001F4C8 *1h \u6da8\u5e45\u699c*")
             lines.extend(up_lines)
-            lines.append("")
-        if down_lines:
-            lines.append("\U0001F4C9 *1h \u8dcc\u5e45\u699c*")
-            lines.extend(down_lines)
+        else:
+            lines.append("  （无）")
+        if extra_up:
+            lines.append("  ━━━━━━━━━━━━━━━")
+            lines.extend(extra_up)
 
+        lines.append("")
+        lines.append("\U0001F4C9 *1h 跌幅榜*")
+        if down_lines:
+            lines.extend(down_lines)
+        else:
+            lines.append("  （无）")
+        if extra_down:
+            lines.append("  ━━━━━━━━━━━━━━━")
+            lines.extend(extra_down)
+
+        # 市场潮汐
         avg_c, up_c, dn_c = self._market_statistics_1h(assets, one_hour_points, "crypto")
         avg_t, up_t, dn_t = self._market_statistics_1h(assets, one_hour_points, "tradfi")
 
         lines.append("")
-        lines.append("━━━━━━━━━━━━━━━")
-        lines.append("\U0001F4CA Crypto 1h Average: {0:+.2f}%".format(avg_c * 100))
-        lines.append("\U0001F7E2 {0} / \U0001F534 {1}".format(up_c, dn_c))
-        lines.append("")
-        lines.append("\U0001F4CA TradFi 1h Average: {0:+.2f}%".format(avg_t * 100))
-        lines.append("\U0001F7E2 {0} / \U0001F534 {1}".format(up_t, dn_t))
+        lines.append("\U0001F30A *市场潮汐*")
+        lines.append("  Crypto 1h Average: {0:+.2f}%".format(avg_c * 100))
+        lines.append("  \U0001F7E2 {0} / \U0001F534 {1}".format(up_c, dn_c))
+        lines.append("  TradFi 1h Average: {0:+.2f}%".format(avg_t * 100))
+        lines.append("  \U0001F7E2 {0} / \U0001F534 {1}".format(up_t, dn_t))
 
         self.telegram.send_report_message("\n".join(lines))
 
         if self.email_sender:
             self.email_sender.send("1小时榜单", "\n".join(lines))
 
+        # 清空1小时记录
+        self.recent_alerts_1h = []
+
     # ============================================================
-    # Top Pump & Dump（保留原版）
+    # Top Pump & Dump（原版保留）
     # ============================================================
 
     def send_top_pump_dump_statistics_report(

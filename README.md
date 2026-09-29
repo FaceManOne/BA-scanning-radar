@@ -108,3 +108,49 @@ BPA is a simple application which gets the price data from Binance Spot or Futur
 - Asset Type | Threshold
 - TradFi | 9M
 - Crypto | 30M
+
+# Report Format
+
+- 15-Minute Summary
+- Above line: Coins currently ≥ Tier 0 (Crypto 2.5% / TradFi 1.5%)
+- Below line: Coins that triggered ≥ Tier 1 (Crypto 5% / TradFi 2.5%) in the past 15 minutes
+- Marker: 1 × 🔥 / ❄️
+
+- 1-Hour Leaderboard
+- Above line: Coins with current 1h gain ≥ threshold (Crypto 10% / TradFi 5%)
+- Below line: Coins that triggered ≥ Tier 2 (Crypto 7.5% / TradFi 3.5%) in the past 1 hour
+- Marker: 2 × 🔥🔥 / ❄️❄️
+
+- eg:15-Minute Summary
+📊 15分钟汇总报告 | 2026-09-28 19:30
+
+📈 涨幅榜
+  BTC +2.85%  3200.5M
+  ━━━━━━━━━━━━━━━
+  🔥 SOL +5.40%
+
+📉 跌幅榜
+  DOGE -3.10%  245.7M
+
+🌊 市场潮汐
+  Crypto Market Average: -0.09%
+  🟢 139 / 🔴 313
+  TradFi Market Average: +0.00%
+  🟢 0 / 🔴 0
+
+  ⏰ 1小时榜单 | 2026-09-28 20:00
+
+- 1-Hour Leaderboard
+📈 1h 涨幅榜
+  XYZ +18.50%  12.3M
+  ━━━━━━━━━━━━━━━
+  🔥🔥 SOL +8.20%
+
+📉 1h 跌幅榜
+  ABC -11.20%  8.7M
+
+🌊 市场潮汐
+  Crypto 1h Average: +0.15%
+  🟢 310 / 🔴 387
+  TradFi 1h Average: -0.08%
+  🟢 8 / 🔴 22
