@@ -101,7 +101,7 @@ BPA is a simple application which gets the price data from Binance Spot or Futur
 
 # Instant Alerts (Tiered, Symmetric Up/Down)
 - Asset Type | Tiers
-- TradFi | 1.5% / 3% / 4.5%
+- TradFi | 1.5% / 2.5% / 3.5%
 - Crypto | 2.5% / 5% / 7.5%
 
 - Trading Volume Threshold
@@ -110,7 +110,6 @@ BPA is a simple application which gets the price data from Binance Spot or Futur
 - Crypto | 30M
 
 # Report Format
-
 - 15-Minute Summary
 - Above line: Coins currently ≥ Tier 0 (Crypto 2.5% / TradFi 1.5%)
 - Below line: Coins that triggered ≥ Tier 1 (Crypto 5% / TradFi 2.5%) in the past 15 minutes
@@ -154,3 +153,5 @@ BPA is a simple application which gets the price data from Binance Spot or Futur
   🟢 310 / 🔴 387
   TradFi 1h Average: -0.08%
   🟢 8 / 🔴 22
+
+# Multi-recipient Email Notification Feature Now Live

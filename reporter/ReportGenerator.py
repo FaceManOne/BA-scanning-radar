@@ -89,7 +89,6 @@ class ReportGenerator:
         self.stock_symbols = stock_symbols or set()
         self.email_sender = email_sender
 
-        # 记录即时警报（用于汇总追加）
         self.recent_alerts_15m = []
         self.recent_alerts_1h = []
 
@@ -109,6 +108,26 @@ class ReportGenerator:
 
     def _levels(self, symbol, direction):
         return self.alert_levels[self._category(symbol)][direction]
+
+    # ============================================================
+    # 单行格式化
+    # ============================================================
+
+    def _fmt_row(self, symbol, change, price, mark=""):
+        """输出格式：币种 | 成交额  涨幅 | 💲价格  [火焰/雪花]"""
+        qv = get_quote_volume(symbol)
+        if qv is None or qv < self._threshold(symbol):
+            return None
+        qv_str = format_volume(qv)
+        sign = "+" if change > 0 else ""
+        price_str = format_price(price)
+
+        base = "  {0} | {1}  {2}{3:.2f}% | \U0001F4B2{4}".format(
+            strip_usdt(symbol), qv_str, sign, change * 100, price_str
+        )
+        if mark:
+            base += "  " + mark
+        return base
 
     # ============================================================
     # 即时警报
@@ -201,16 +220,17 @@ class ReportGenerator:
                 self.send_pump_message(asset["symbol"], interval, change, price)
                 asset["push_level_up"] = target_up
 
-                # 记录：用于汇总追加
                 self.recent_alerts_15m.append({
                     "symbol": asset["symbol"],
                     "change": change,
+                    "price": price,
                     "level": target_up,
                     "direction": "up",
                 })
                 self.recent_alerts_1h.append({
                     "symbol": asset["symbol"],
                     "change": change,
+                    "price": price,
                     "level": target_up,
                     "direction": "up",
                 })
@@ -235,12 +255,14 @@ class ReportGenerator:
                 self.recent_alerts_15m.append({
                     "symbol": asset["symbol"],
                     "change": change,
+                    "price": price,
                     "level": target_down,
                     "direction": "down",
                 })
                 self.recent_alerts_1h.append({
                     "symbol": asset["symbol"],
                     "change": change,
+                    "price": price,
                     "level": target_down,
                     "direction": "down",
                 })
@@ -302,7 +324,6 @@ class ReportGenerator:
     # ============================================================
 
     def _build_extra_block(self, alerts, min_level):
-        """从 alerts 里筛选出 level >= min_level 的币，去重后返回两组行。"""
         seen = {}
         for a in alerts:
             if a["level"] < min_level:
@@ -314,17 +335,16 @@ class ReportGenerator:
         up_lines = []
         down_lines = []
         for sym, a in seen.items():
-            sign = "+" if a["change"] > 0 else ""
-            line = "  {0} {1} {2}{3:.2f}%".format(
-                "\U0001F525" * min_level if a["direction"] == "up" else "\u2744\uFE0F" * min_level,
-                strip_usdt(sym),
-                sign,
-                a["change"] * 100,
-            )
             if a["direction"] == "up":
-                up_lines.append(line)
+                mark = "\U0001F525" * min_level
+                line = self._fmt_row(sym, a["change"], a["price"], mark)
+                if line is not None:
+                    up_lines.append(line)
             else:
-                down_lines.append(line)
+                mark = "\u2744\uFE0F" * min_level
+                line = self._fmt_row(sym, a["change"], a["price"], mark)
+                if line is not None:
+                    down_lines.append(line)
         return up_lines, down_lines
 
     # ============================================================
@@ -343,37 +363,28 @@ class ReportGenerator:
             cat = self._category(asset["symbol"])
             base = min(self.alert_levels[cat]["up"])
             if change >= base:
-                ups.append((asset["symbol"], change))
+                ups.append((asset["symbol"], change, asset["price"][-1]))
             elif change <= -base:
-                downs.append((asset["symbol"], change))
+                downs.append((asset["symbol"], change, asset["price"][-1]))
 
         ups.sort(key=lambda x: x[1], reverse=True)
         downs.sort(key=lambda x: x[1])
-
-        def fmt_line(sym, chg):
-            qv = get_quote_volume(sym)
-            if qv is None or qv < self._threshold(sym):
-                return None
-            qv_str = format_volume(qv)
-            sign = "+" if chg > 0 else ""
-            return "  {0} {1}{2:.2f}%  |  {3}".format(strip_usdt(sym), sign, chg * 100, qv_str)
 
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
         lines = ["\U0001F4CA *15分钟汇总报告* | {0}".format(now_str), ""]
 
         up_lines = []
-        for sym, chg in ups[:max_coins]:
-            line = fmt_line(sym, chg)
+        for sym, chg, price in ups[:max_coins]:
+            line = self._fmt_row(sym, chg, price)
             if line is not None:
                 up_lines.append(line)
 
         down_lines = []
-        for sym, chg in downs[:max_coins]:
-            line = fmt_line(sym, chg)
+        for sym, chg, price in downs[:max_coins]:
+            line = self._fmt_row(sym, chg, price)
             if line is not None:
                 down_lines.append(line)
 
-        # 追加：过去15分钟触及 >= 第1档 的
         extra_up, extra_down = self._build_extra_block(self.recent_alerts_15m, 1)
 
         lines.append("\U0001F4C8 *涨幅榜*")
@@ -382,7 +393,7 @@ class ReportGenerator:
         else:
             lines.append("  （无）")
         if extra_up:
-            lines.append("  ━━━━━━━━━━━━━━━")
+            lines.append("  " + "\u2501" * 35)
             lines.extend(extra_up)
 
         lines.append("")
@@ -392,10 +403,9 @@ class ReportGenerator:
         else:
             lines.append("  （无）")
         if extra_down:
-            lines.append("  ━━━━━━━━━━━━━━━")
+            lines.append("  " + "\u2501" * 35)
             lines.extend(extra_down)
 
-        # 市场潮汐
         avg_c, up_c, dn_c = self._market_statistics(assets, interval, "crypto")
         avg_t, up_t, dn_t = self._market_statistics(assets, interval, "tradfi")
 
@@ -409,9 +419,8 @@ class ReportGenerator:
         self.telegram.send_report_message("\n".join(lines))
 
         if self.email_sender:
-            self.email_sender.send("15分钟汇总报告", "\n".join(lines))
+            self.email_sender.send("15分钟汇总报告 | {0}".format(now_str), "\n".join(lines))
 
-        # 清空15分钟记录
         self.recent_alerts_15m = []
 
     # ============================================================
@@ -450,34 +459,25 @@ class ReportGenerator:
             cat = self._category(asset["symbol"])
             threshold = min_change[cat]
             if change >= threshold:
-                ups.append((asset["symbol"], change))
+                ups.append((asset["symbol"], change, ps[-1]))
             elif change <= -threshold:
-                downs.append((asset["symbol"], change))
+                downs.append((asset["symbol"], change, ps[-1]))
 
         ups.sort(key=lambda x: x[1], reverse=True)
         downs.sort(key=lambda x: x[1])
 
-        def fmt_line(sym, chg):
-            qv = get_quote_volume(sym)
-            if qv is None or qv < self._threshold(sym):
-                return None
-            qv_str = format_volume(qv)
-            sign = "+" if chg > 0 else ""
-            return "  {0} {1}{2:.2f}%  |  {3}".format(strip_usdt(sym), sign, chg * 100, qv_str)
-
         up_lines = []
-        for sym, chg in ups[:max_coins]:
-            line = fmt_line(sym, chg)
+        for sym, chg, price in ups[:max_coins]:
+            line = self._fmt_row(sym, chg, price)
             if line is not None:
                 up_lines.append(line)
 
         down_lines = []
-        for sym, chg in downs[:max_coins]:
-            line = fmt_line(sym, chg)
+        for sym, chg, price in downs[:max_coins]:
+            line = self._fmt_row(sym, chg, price)
             if line is not None:
                 down_lines.append(line)
 
-        # 追加：过去1小时触及 >= 第2档 的
         extra_up, extra_down = self._build_extra_block(self.recent_alerts_1h, 2)
 
         lines = ["\u23F0 *1\u5c0f\u65f6\u699c\u5355* | {0}".format(now_str), ""]
@@ -488,7 +488,7 @@ class ReportGenerator:
         else:
             lines.append("  （无）")
         if extra_up:
-            lines.append("  ━━━━━━━━━━━━━━━")
+            lines.append("  " + "\u2501" * 35)
             lines.extend(extra_up)
 
         lines.append("")
@@ -498,10 +498,9 @@ class ReportGenerator:
         else:
             lines.append("  （无）")
         if extra_down:
-            lines.append("  ━━━━━━━━━━━━━━━")
+            lines.append("  " + "\u2501" * 35)
             lines.extend(extra_down)
 
-        # 市场潮汐
         avg_c, up_c, dn_c = self._market_statistics_1h(assets, one_hour_points, "crypto")
         avg_t, up_t, dn_t = self._market_statistics_1h(assets, one_hour_points, "tradfi")
 
@@ -515,9 +514,8 @@ class ReportGenerator:
         self.telegram.send_report_message("\n".join(lines))
 
         if self.email_sender:
-            self.email_sender.send("1小时榜单", "\n".join(lines))
+            self.email_sender.send("1小时榜单 | {0}".format(now_str), "\n".join(lines))
 
-        # 清空1小时记录
         self.recent_alerts_1h = []
 
     # ============================================================
