@@ -85,8 +85,8 @@ def main():
         email_sender=email_sender,
         alert_skip_threshold=config["alertSkipThreshold"],
         alert_levels=config.get("alertLevels", {
-            "crypto": {"up": [0.025, 0.05, 0.075], "down": [0.025, 0.05, 0.075]},
-            "tradfi": {"up": [0.015, 0.03, 0.045], "down": [0.015, 0.03, 0.045]},
+            "crypto": {"up": [0.025, 0.05, 0.075, 0.10], "down": [0.025, 0.05, 0.075, 0.10]},
+            "tradfi": {"up": [0.015, 0.025, 0.03, 0.035], "down": [0.015, 0.025, 0.03, 0.035]},
         }),
         min_quote_volume=config.get("minQuoteVolume", {
             "crypto": 30_000_000,
@@ -126,7 +126,6 @@ def main():
         },
         hourly_report_config={
             "enabled": config.get("hourlyReportEnabled", True),
-            "min_change": config.get("hourlyReportMinChange", {"crypto": 0.10, "tradfi": 0.05}),
             "max_coins": config.get("hourlyReportMaxCoins", 10),
         },
         stock_symbols=stock_symbols,

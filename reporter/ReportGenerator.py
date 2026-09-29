@@ -428,7 +428,11 @@ class ReportGenerator:
     # ============================================================
 
     def send_hourly_report(self, assets, chart_intervals, extract_interval, hourly_config):
-        min_change = hourly_config.get("min_change", {"crypto": 0.10, "tradfi": 0.05})
+        # 1小时上方榜单使用第3档
+        min_change = {
+            "crypto": self.alert_levels["crypto"]["up"][3],
+            "tradfi": self.alert_levels["tradfi"]["up"][3],
+        }
         max_coins = hourly_config.get("max_coins", 10)
         interval = list(chart_intervals.keys())[0]
 
