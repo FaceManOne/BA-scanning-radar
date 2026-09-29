@@ -29,12 +29,12 @@ alertLevels:
   tradfi:
     up:
       - 0.015
-      - 0.03
-      - 0.045
+      - 0.025
+      - 0.035
     down:
       - 0.015
-      - 0.03
-      - 0.045
+      - 0.025
+      - 0.035
 
 # 1小时榜单阈值
 hourlyReportEnabled: True
@@ -88,3 +88,13 @@ priceRetryInterval: 5s
 checkNewListingEnabled: True
 # Disables rounding to nearest hour for first TPD if false
 topReportNearestHour: True
+
+# 邮件通知
+emailEnabled: True
+emailSmtpServer: 
+emailSmtpPort: 
+emailSender: 
+emailAuthCode: 
+emailReceiver:
+  - 
+  - 
