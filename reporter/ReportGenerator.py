@@ -77,8 +77,8 @@ class ReportGenerator:
 
         if alert_levels is None:
             alert_levels = {
-                "crypto": {"up": [0.025, 0.05, 0.075], "down": [0.025, 0.05, 0.075]},
-                "tradfi": {"up": [0.015, 0.025, 0.035], "down": [0.015, 0.025, 0.035]},
+                "crypto": {"up": [0.025, 0.05, 0.075, 0.10], "down": [0.025, 0.05, 0.075, 0.10]},
+                "tradfi": {"up": [0.015, 0.025, 0.03, 0.035], "down": [0.015, 0.025, 0.03, 0.035]},
             }
         self.alert_levels = alert_levels
 
@@ -320,7 +320,7 @@ class ReportGenerator:
         return sum_change / total, up, down
 
     # ============================================================
-    # 追加区块：曾触及高档位
+    # 追加区块：曾触及高档位 倒序
     # ============================================================
 
     def _build_extra_block(self, alerts, min_level):
@@ -332,19 +332,26 @@ class ReportGenerator:
             if sym not in seen or abs(a["change"]) > abs(seen[sym]["change"]):
                 seen[sym] = a
 
+        # 分涨跌，各自按幅度排序
+        ups = [a for a in seen.values() if a["direction"] == "up"]
+        downs = [a for a in seen.values() if a["direction"] == "down"]
+        ups.sort(key=lambda x: x["change"], reverse=True)   # 涨得多的在前
+        downs.sort(key=lambda x: x["change"])               # 跌得狠的在前
+
         up_lines = []
+        for a in ups:
+            mark = "\U0001F525" * min_level
+            line = self._fmt_row(a["symbol"], a["change"], a["price"], mark)
+            if line is not None:
+                up_lines.append(line)
+
         down_lines = []
-        for sym, a in seen.items():
-            if a["direction"] == "up":
-                mark = "\U0001F525" * min_level
-                line = self._fmt_row(sym, a["change"], a["price"], mark)
-                if line is not None:
-                    up_lines.append(line)
-            else:
-                mark = "\u2744\uFE0F" * min_level
-                line = self._fmt_row(sym, a["change"], a["price"], mark)
-                if line is not None:
-                    down_lines.append(line)
+        for a in downs:
+            mark = "\u2744\uFE0F" * min_level
+            line = self._fmt_row(a["symbol"], a["change"], a["price"], mark)
+            if line is not None:
+                down_lines.append(line)
+
         return up_lines, down_lines
 
     # ============================================================
@@ -393,7 +400,7 @@ class ReportGenerator:
         else:
             lines.append("  （无）")
         if extra_up:
-            lines.append("  " + "\u2501" * 35)
+            lines.append("  " + "\u2501" * 28)
             lines.extend(extra_up)
 
         lines.append("")
@@ -403,7 +410,7 @@ class ReportGenerator:
         else:
             lines.append("  （无）")
         if extra_down:
-            lines.append("  " + "\u2501" * 35)
+            lines.append("  " + "\u2501" * 28)
             lines.extend(extra_down)
 
         avg_c, up_c, dn_c = self._market_statistics(assets, interval, "crypto")
@@ -492,7 +499,7 @@ class ReportGenerator:
         else:
             lines.append("  （无）")
         if extra_up:
-            lines.append("  " + "\u2501" * 35)
+            lines.append("  " + "\u2501" * 28)
             lines.extend(extra_up)
 
         lines.append("")
@@ -502,7 +509,7 @@ class ReportGenerator:
         else:
             lines.append("  （无）")
         if extra_down:
-            lines.append("  " + "\u2501" * 35)
+            lines.append("  " + "\u2501" * 28)
             lines.extend(extra_down)
 
         avg_c, up_c, dn_c = self._market_statistics_1h(assets, one_hour_points, "crypto")
