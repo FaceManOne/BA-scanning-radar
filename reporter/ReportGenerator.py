@@ -109,6 +109,13 @@ class ReportGenerator:
     def _levels(self, symbol, direction):
         return self.alert_levels[self._category(symbol)][direction]
 
+    def _label(self, symbol):
+        """去掉 USDT 后缀，TradFi 加 ᵀ 上标。"""
+        name = strip_usdt(symbol)
+        if symbol in self.stock_symbols:
+            return name + "\u1D40"
+        return name
+
     # ============================================================
     # 单行格式化
     # ============================================================
@@ -123,7 +130,7 @@ class ReportGenerator:
         price_str = format_price(price)
 
         base = "  {0} | {1}  {2}{3:.2f}% | \U0001F4B2{4}".format(
-            strip_usdt(symbol), qv_str, sign, change * 100, price_str
+            self._label(symbol), qv_str, sign, change * 100, price_str
         )
         if mark:
             base += "  " + mark
@@ -151,7 +158,7 @@ class ReportGenerator:
 
         msg = "{0} {1} | {2} | \U0001F30A{3} {4}{5}{6:.2f}% | \U0001F4B2{7}".format(
             emoji,
-            strip_usdt(symbol),
+            self._label(symbol),
             interval,
             qv_str,
             arrow,
@@ -187,7 +194,7 @@ class ReportGenerator:
 
         message += "\n"
         for symbol in symbols_to_add:
-            message += "- _{0}_\n".format(symbol)
+            message += "- _{0}_\n".format(self._label(symbol))
 
         self.telegram.send_news_message(message, is_alert_chat=True)
 
@@ -332,11 +339,10 @@ class ReportGenerator:
             if sym not in seen or abs(a["change"]) > abs(seen[sym]["change"]):
                 seen[sym] = a
 
-        # 分涨跌，各自按幅度排序
         ups = [a for a in seen.values() if a["direction"] == "up"]
         downs = [a for a in seen.values() if a["direction"] == "down"]
-        ups.sort(key=lambda x: x["change"], reverse=True)   # 涨得多的在前
-        downs.sort(key=lambda x: x["change"])               # 跌得狠的在前
+        ups.sort(key=lambda x: x["change"], reverse=True)
+        downs.sort(key=lambda x: x["change"])
 
         up_lines = []
         for a in ups:
@@ -435,10 +441,10 @@ class ReportGenerator:
     # ============================================================
 
     def send_hourly_report(self, assets, chart_intervals, extract_interval, hourly_config):
-        # 1小时上方榜单使用第3档
+        # 1小时上方榜单使用第2档
         min_change = {
-            "crypto": self.alert_levels["crypto"]["up"][3],
-            "tradfi": self.alert_levels["tradfi"]["up"][3],
+            "crypto": self.alert_levels["crypto"]["up"][2],
+            "tradfi": self.alert_levels["tradfi"]["up"][2],
         }
         max_coins = hourly_config.get("max_coins", 10)
         interval = list(chart_intervals.keys())[0]
@@ -477,19 +483,21 @@ class ReportGenerator:
         ups.sort(key=lambda x: x[1], reverse=True)
         downs.sort(key=lambda x: x[1])
 
+        # 上方榜单：带 🔥🔥 / ❄️❄️
         up_lines = []
         for sym, chg, price in ups[:max_coins]:
-            line = self._fmt_row(sym, chg, price)
+            line = self._fmt_row(sym, chg, price, mark="\U0001F525" * 2)
             if line is not None:
                 up_lines.append(line)
 
         down_lines = []
         for sym, chg, price in downs[:max_coins]:
-            line = self._fmt_row(sym, chg, price)
+            line = self._fmt_row(sym, chg, price, mark="\u2744\uFE0F" * 2)
             if line is not None:
                 down_lines.append(line)
 
-        extra_up, extra_down = self._build_extra_block(self.recent_alerts_1h, 2)
+        # 下方追加：第3档，带 🔥🔥🔥 / ❄️❄️❄️
+        extra_up, extra_down = self._build_extra_block(self.recent_alerts_1h, 3)
 
         lines = ["\u23F0 *1\u5c0f\u65f6\u699c\u5355* | {0}".format(now_str), ""]
 
@@ -547,14 +555,14 @@ class ReportGenerator:
             lst = sorted(assets, key=lambda item: item[interval]["change_current"], reverse=True)[0:no_of_reported_coins]
             message += "{0} *Top {1} Pumps*\n".format(self.pump_emoji, no_of_reported_coins)
             for asset in lst:
-                message += "- {0}: _{1:.2f}_%\n".format(strip_usdt(asset["symbol"]), asset[interval]["change_current"] * 100)
+                message += "- {0}: _{1:.2f}_%\n".format(self._label(asset["symbol"]), asset[interval]["change_current"] * 100)
             message += "\n"
 
         if top_dump_enabled:
             lst = sorted(assets, key=lambda item: item[interval]["change_current"])[0:no_of_reported_coins]
             message += "{0} *Top {1} Dumps*\n".format(self.dump_emoji, no_of_reported_coins)
             for asset in lst:
-                message += "- {0}: _{1:.2f}_%\n".format(strip_usdt(asset["symbol"]), asset[interval]["change_current"] * 100)
+                message += "- {0}: _{1:.2f}_%\n".format(self._label(asset["symbol"]), asset[interval]["change_current"] * 100)
 
         if additional_stats_enabled:
             if top_pump_enabled or top_dump_enabled:
