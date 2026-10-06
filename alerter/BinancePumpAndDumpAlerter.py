@@ -212,6 +212,9 @@ class BinancePumpAndDumpAlerter:
     ):
         for asset in monitored_assets:
             exchange_asset = self.extract_ticker_data(asset["symbol"], exchange_assets)
+            if exchange_asset is None:
+                self.logger.warning("【跳过】本轮未找到 %s 的行情，跳过。", asset["symbol"])
+                continue
             asset["price"].append(float(exchange_asset["price"]))
 
             self.calculate_asset_change(

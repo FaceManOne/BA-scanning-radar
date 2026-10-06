@@ -406,7 +406,7 @@ class ReportGenerator:
         else:
             lines.append("  （无）")
         if extra_up:
-            lines.append("  " + "\u2501" * 28)
+            lines.append("  " + "\u2501" * 22)
             lines.extend(extra_up)
 
         lines.append("")
@@ -416,7 +416,7 @@ class ReportGenerator:
         else:
             lines.append("  （无）")
         if extra_down:
-            lines.append("  " + "\u2501" * 28)
+            lines.append("  " + "\u2501" * 22)
             lines.extend(extra_down)
 
         avg_c, up_c, dn_c = self._market_statistics(assets, interval, "crypto")
@@ -507,7 +507,7 @@ class ReportGenerator:
         else:
             lines.append("  （无）")
         if extra_up:
-            lines.append("  " + "\u2501" * 28)
+            lines.append("  " + "\u2501" * 22)
             lines.extend(extra_up)
 
         lines.append("")
@@ -517,7 +517,7 @@ class ReportGenerator:
         else:
             lines.append("  （无）")
         if extra_down:
-            lines.append("  " + "\u2501" * 28)
+            lines.append("  " + "\u2501" * 22)
             lines.extend(extra_down)
 
         avg_c, up_c, dn_c = self._market_statistics_1h(assets, one_hour_points, "crypto")
