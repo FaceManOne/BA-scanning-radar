@@ -113,7 +113,7 @@ class ReportGenerator:
         """去掉 USDT 后缀，TradFi 加 ᵀ 上标。"""
         name = strip_usdt(symbol)
         if symbol in self.stock_symbols:
-            return name + "\u1D40"
+            return name + "\u00AE"
         return name
 
     # ============================================================
