@@ -92,6 +92,10 @@ def main():
             "crypto": 30_000_000,
             "tradfi": 9_000_000,
         }),
+        max_coins_per_category={
+            "crypto": config.get("cryptoMaxCoins", 15),
+            "tradfi": config.get("tradfiMaxCoins", 15),
+        },
         stock_symbols=stock_symbols,
         pump_emoji=config["pumpEmoji"],
         dump_emoji=config["dumpEmoji"],
@@ -122,11 +126,9 @@ def main():
         summary_config={
             "enabled": config.get("summaryEnabled", True),
             "min_change": config.get("summaryMinChange", 0.05),
-            "max_coins": config.get("summaryMaxCoins", 20),
         },
         hourly_report_config={
             "enabled": config.get("hourlyReportEnabled", True),
-            "max_coins": config.get("hourlyReportMaxCoins", 10),
         },
         stock_symbols=stock_symbols,
     )

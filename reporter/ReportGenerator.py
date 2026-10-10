@@ -67,6 +67,7 @@ class ReportGenerator:
         min_quote_volume=None,
         stock_symbols=None,
         email_sender=None,
+        max_coins_per_category=None,
         pump_emoji="\U0001F7E2",
         dump_emoji="\U0001F534",
     ):
@@ -85,6 +86,10 @@ class ReportGenerator:
         if min_quote_volume is None:
             min_quote_volume = {"crypto": 30_000_000, "tradfi": 9_000_000}
         self.min_quote_volume = min_quote_volume
+
+        if max_coins_per_category is None:
+            max_coins_per_category = {"crypto": 15, "tradfi": 15}
+        self.max_coins_per_category = max_coins_per_category
 
         self.stock_symbols = stock_symbols or set()
         self.email_sender = email_sender
@@ -110,7 +115,6 @@ class ReportGenerator:
         return self.alert_levels[self._category(symbol)][direction]
 
     def _label(self, symbol):
-        """去掉 USDT 后缀，TradFi 加 ᵀ 上标。"""
         name = strip_usdt(symbol)
         if symbol in self.stock_symbols:
             return name + "\u00AE"
@@ -121,7 +125,6 @@ class ReportGenerator:
     # ============================================================
 
     def _fmt_row(self, symbol, change, price, mark=""):
-        """输出格式：币种 | 成交额  涨幅 | 💲价格  [火焰/雪花]"""
         qv = get_quote_volume(symbol)
         if qv is None or qv < self._threshold(symbol):
             return None
@@ -135,6 +138,21 @@ class ReportGenerator:
         if mark:
             base += "  " + mark
         return base
+
+    # ============================================================
+    # 分组排序工具
+    # ============================================================
+
+    def _split_and_sort(self, items, reverse):
+        """items: [(sym, chg, price)]，返回：TradFi 前N + Crypto 前N。"""
+        tradfi = [x for x in items if self._category(x[0]) == "tradfi"]
+        crypto = [x for x in items if self._category(x[0]) == "crypto"]
+        tradfi.sort(key=lambda x: x[1], reverse=reverse)
+        crypto.sort(key=lambda x: x[1], reverse=reverse)
+        return (
+            tradfi[: self.max_coins_per_category["tradfi"]]
+            + crypto[: self.max_coins_per_category["crypto"]]
+        )
 
     # ============================================================
     # 即时警报
@@ -213,7 +231,6 @@ class ReportGenerator:
         for interval in chart_intervals:
             change = asset[interval]["change_current"]
 
-            # 涨侧
             target_up = 0
             up_levels = sorted(self._levels(asset["symbol"], "up"))
             for idx, lv in enumerate(up_levels):
@@ -242,7 +259,6 @@ class ReportGenerator:
                     "direction": "up",
                 })
 
-            # 跌侧
             if not dump_enabled:
                 continue
 
@@ -327,7 +343,7 @@ class ReportGenerator:
         return sum_change / total, up, down
 
     # ============================================================
-    # 追加区块：曾触及高档位 倒序
+    # 追加区块
     # ============================================================
 
     def _build_extra_block(self, alerts, min_level):
@@ -341,20 +357,30 @@ class ReportGenerator:
 
         ups = [a for a in seen.values() if a["direction"] == "up"]
         downs = [a for a in seen.values() if a["direction"] == "down"]
-        ups.sort(key=lambda x: x["change"], reverse=True)
-        downs.sort(key=lambda x: x["change"])
+
+        # 分 TradFi / Crypto，各自排序，各自截断
+        ups = self._split_and_sort(
+            [(a["symbol"], a["change"], a["price"]) for a in ups], reverse=True
+        )
+        downs = self._split_and_sort(
+            [(a["symbol"], a["change"], a["price"]) for a in downs], reverse=False
+        )
+
+        # 用 symbol 找回原始记录（用于标记方向）
+        seen_up = {a["symbol"]: a for a in seen.values() if a["direction"] == "up"}
+        seen_down = {a["symbol"]: a for a in seen.values() if a["direction"] == "down"}
 
         up_lines = []
-        for a in ups:
+        for sym, chg, price in ups:
             mark = "\U0001F525" * min_level
-            line = self._fmt_row(a["symbol"], a["change"], a["price"], mark)
+            line = self._fmt_row(sym, chg, price, mark)
             if line is not None:
                 up_lines.append(line)
 
         down_lines = []
-        for a in downs:
+        for sym, chg, price in downs:
             mark = "\u2744\uFE0F" * min_level
-            line = self._fmt_row(a["symbol"], a["change"], a["price"], mark)
+            line = self._fmt_row(sym, chg, price, mark)
             if line is not None:
                 down_lines.append(line)
 
@@ -365,8 +391,6 @@ class ReportGenerator:
     # ============================================================
 
     def send_summary_report(self, assets, chart_intervals, summary_config):
-        min_change = summary_config.get("min_change", 0.025)
-        max_coins = summary_config.get("max_coins", 20)
         interval = list(chart_intervals.keys())[0]
 
         ups = []
@@ -380,20 +404,20 @@ class ReportGenerator:
             elif change <= -base:
                 downs.append((asset["symbol"], change, asset["price"][-1]))
 
-        ups.sort(key=lambda x: x[1], reverse=True)
-        downs.sort(key=lambda x: x[1])
+        ups = self._split_and_sort(ups, reverse=True)
+        downs = self._split_and_sort(downs, reverse=False)
 
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
         lines = ["\U0001F4CA *15分钟汇总报告* | {0}".format(now_str), ""]
 
         up_lines = []
-        for sym, chg, price in ups[:max_coins]:
+        for sym, chg, price in ups:
             line = self._fmt_row(sym, chg, price)
             if line is not None:
                 up_lines.append(line)
 
         down_lines = []
-        for sym, chg, price in downs[:max_coins]:
+        for sym, chg, price in downs:
             line = self._fmt_row(sym, chg, price)
             if line is not None:
                 down_lines.append(line)
@@ -441,12 +465,10 @@ class ReportGenerator:
     # ============================================================
 
     def send_hourly_report(self, assets, chart_intervals, extract_interval, hourly_config):
-        # 1小时上方榜单使用第2档
         min_change = {
             "crypto": self.alert_levels["crypto"]["up"][2],
             "tradfi": self.alert_levels["tradfi"]["up"][2],
         }
-        max_coins = hourly_config.get("max_coins", 10)
         interval = list(chart_intervals.keys())[0]
 
         one_hour_points = 3600 // extract_interval
@@ -480,23 +502,21 @@ class ReportGenerator:
             elif change <= -threshold:
                 downs.append((asset["symbol"], change, ps[-1]))
 
-        ups.sort(key=lambda x: x[1], reverse=True)
-        downs.sort(key=lambda x: x[1])
+        ups = self._split_and_sort(ups, reverse=True)
+        downs = self._split_and_sort(downs, reverse=False)
 
-        # 上方榜单：带 🔥🔥 / ❄️❄️
         up_lines = []
-        for sym, chg, price in ups[:max_coins]:
+        for sym, chg, price in ups:
             line = self._fmt_row(sym, chg, price, mark="\U0001F525" * 2)
             if line is not None:
                 up_lines.append(line)
 
         down_lines = []
-        for sym, chg, price in downs[:max_coins]:
+        for sym, chg, price in downs:
             line = self._fmt_row(sym, chg, price, mark="\u2744\uFE0F" * 2)
             if line is not None:
                 down_lines.append(line)
 
-        # 下方追加：第3档，带 🔥🔥🔥 / ❄️❄️❄️
         extra_up, extra_down = self._build_extra_block(self.recent_alerts_1h, 3)
 
         lines = ["\u23F0 *1\u5c0f\u65f6\u699c\u5355* | {0}".format(now_str), ""]

@@ -45,7 +45,9 @@ hourlyReportEnabled: True
 hourlyReportMinChange:
   crypto: 0.10
   tradfi: 0.05
-hourlyReportMaxCoins: 10
+# 榜单数量限制
+cryptoMaxCoins: 15
+tradfiMaxCoins: 15
 
 
 telegramToken: 
@@ -90,6 +92,7 @@ resetInterval: 12h
 priceRetryInterval: 5s
 # Disables checking and adding of new listing pairs
 checkNewListingEnabled: True
+
 # Disables rounding to nearest hour for first TPD if false
 topReportNearestHour: True
 
@@ -100,5 +103,5 @@ emailSmtpPort:
 emailSender: 
 emailAuthCode: 
 emailReceiver:
-  - 
+  - 3xxx
   - 
